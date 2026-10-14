@@ -256,7 +256,8 @@ export default function AdminSection({
               </TableHeader>
               <TableBody>
                 {adminFilteredProducts.map((product) => {
-                  const margin = product.price - product.costPrice
+                  const costPrice = product.costPrice ?? 0
+                  const margin = product.price - costPrice
                   const marginPct = product.price > 0 ? Math.round((margin / product.price) * 100) : 0
                   return (
                     <TableRow key={product.id} className="border-gold/10">
@@ -287,7 +288,7 @@ export default function AdminSection({
                         {formatPrice(product.price)}
                       </TableCell>
                       <TableCell className="text-right font-sans text-sm text-ink-muted">
-                        {formatPrice(product.costPrice)}
+                        {formatPrice(costPrice)}
                       </TableCell>
                       <TableCell className="text-right">
                         <span className={`text-sm font-medium ${marginPct >= 50 ? 'text-[#4A7C59]' : marginPct >= 30 ? 'text-ink' : 'text-[#8B3A3A]'}`}>
@@ -562,6 +563,15 @@ export default function AdminSection({
             <div className="space-y-3">
               {ordersData.orders.map((order) => {
                 const statusInfo = STATUS_MAP[order.status] || STATUS_MAP.pending
+                const statusOptions = order.status === 'pending'
+                  ? [['pending', 'Pendiente'], ['confirmed', 'Confirmado'], ['cancelled', 'Cancelado']]
+                  : order.status === 'confirmed'
+                    ? [['confirmed', 'Confirmado'], ['shipped', 'Enviado'], ['cancelled', 'Cancelado']]
+                    : order.status === 'shipped'
+                      ? [['shipped', 'Enviado'], ['delivered', 'Entregado']]
+                      : order.status === 'delivered'
+                        ? [['delivered', 'Entregado']]
+                        : [['cancelled', 'Cancelado']]
                 return (
                   <Card key={order.id} className="border-gold/15 transition-all hover:shadow-md">
                     <CardContent className="p-4">
@@ -617,11 +627,9 @@ export default function AdminSection({
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
-                                <SelectItem value="pending">Pendiente</SelectItem>
-                                <SelectItem value="confirmed">Confirmado</SelectItem>
-                                <SelectItem value="shipped">Enviado</SelectItem>
-                                <SelectItem value="delivered">Entregado</SelectItem>
-                                <SelectItem value="cancelled">Cancelado</SelectItem>
+                                {statusOptions.map(([value, label]) => (
+                                  <SelectItem key={value} value={value}>{label}</SelectItem>
+                                ))}
                               </SelectContent>
                             </Select>
                             <Button

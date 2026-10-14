@@ -1,7 +1,9 @@
 'use client'
 
+import { useState } from 'react'
 import { useCartStore } from '@/lib/cart-store'
-import { formatPrice, getWhatsAppUrl } from '@/lib/whatsapp'
+import { formatPrice, getWhatsAppOrderUrl, type WhatsAppOrderLine } from '@/lib/whatsapp'
+import { getEffectivePrice } from '@/lib/pricing'
 import { getGradient, getProductImages } from '@/lib/shared'
 import { toast } from 'sonner'
 
@@ -15,6 +17,7 @@ import {
   Minus,
   Trash2,
   MessageCircle,
+  Loader2,
 } from 'lucide-react'
 
 interface CartSectionProps {
@@ -22,6 +25,8 @@ interface CartSectionProps {
 }
 
 export default function CartSection({ onGoToCatalog }: CartSectionProps) {
+  const [submittingOrder, setSubmittingOrder] = useState(false)
+  const [whatsAppFallbackUrl, setWhatsAppFallbackUrl] = useState<string | null>(null)
   const cartItems = useCartStore((s) => s.items)
   const removeItem = useCartStore((s) => s.removeItem)
   const updateQuantity = useCartStore((s) => s.updateQuantity)
@@ -31,7 +36,46 @@ export default function CartSection({ onGoToCatalog }: CartSectionProps) {
   const cartTotal = getTotal()
   const cartCount = getItemCount()
 
-  const whatsappUrl = cartItems.length === 0 ? '#' : getWhatsAppUrl(cartItems, cartTotal)
+  const handleWhatsAppCheckout = async () => {
+    if (submittingOrder || cartItems.length === 0) return
+
+    const whatsappWindow = window.open('about:blank', '_blank')
+    if (whatsappWindow) whatsappWindow.opener = null
+    setSubmittingOrder(true)
+    setWhatsAppFallbackUrl(null)
+
+    try {
+      const response = await fetch('/api/orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          items: cartItems.map(({ product, quantity }) => ({
+            productId: product.id,
+            quantity,
+          })),
+        }),
+      })
+      const order = await response.json() as {
+        error?: string
+        total: number
+        items: WhatsAppOrderLine[]
+      }
+      if (!response.ok) throw new Error(order.error || 'No se pudo preparar el pedido')
+
+      const url = getWhatsAppOrderUrl(order.items, order.total)
+      if (whatsappWindow) {
+        whatsappWindow.location.href = url
+      } else {
+        setWhatsAppFallbackUrl(url)
+        toast.info('El navegador bloqueó la apertura automática. Usá el enlace para continuar por WhatsApp.')
+      }
+    } catch (error) {
+      whatsappWindow?.close()
+      toast.error(error instanceof Error ? error.message : 'No se pudo preparar el pedido')
+    } finally {
+      setSubmittingOrder(false)
+    }
+  }
 
   return (
     <section className="mx-auto w-full max-w-3xl px-4 py-6">
@@ -63,7 +107,7 @@ export default function CartSection({ onGoToCatalog }: CartSectionProps) {
           {/* Cart Items */}
           <div className="space-y-3">
             {cartItems.map((item) => {
-              const itemPrice = item.product.promoPrice || item.product.price
+              const itemPrice = getEffectivePrice(item.product.price, item.product.promoPrice)
               return (
                 <div
                   key={item.product.id}
@@ -161,11 +205,26 @@ export default function CartSection({ onGoToCatalog }: CartSectionProps) {
               className="w-full gap-2 bg-[#4A7C59] text-white hover:bg-[#3d6a4b]"
               size="lg"
             >
-              <a href={whatsappUrl} target="_blank" rel="noopener noreferrer">
-                <MessageCircle className="size-5" />
-                Finalizar compra por WhatsApp
-              </a>
+              <button
+                type="button"
+                onClick={handleWhatsAppCheckout}
+                disabled={submittingOrder}
+                className="flex w-full items-center justify-center gap-2 disabled:cursor-wait disabled:opacity-70"
+              >
+                {submittingOrder ? <Loader2 className="size-5 animate-spin" /> : <MessageCircle className="size-5" />}
+                {submittingOrder ? 'Preparando pedido...' : 'Finalizar compra por WhatsApp'}
+              </button>
             </Button>
+            {whatsAppFallbackUrl && (
+              <a
+                href={whatsAppFallbackUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block text-center text-sm font-medium text-[#4A7C59] underline"
+              >
+                Abrir pedido en WhatsApp
+              </a>
+            )}
 
             <Button
               variant="outline"

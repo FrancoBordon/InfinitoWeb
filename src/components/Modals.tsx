@@ -414,7 +414,7 @@ export default function Modals({
                   <input
                     ref={productFileInputRef}
                     type="file"
-                    accept="image/*"
+                    accept=".jpg,.jpeg,.png,.gif,.webp,.bmp"
                     multiple
                     className="hidden"
                     onChange={onProductImageUpload}
@@ -635,7 +635,7 @@ export default function Modals({
                   <input
                     ref={categoryFileInputRef}
                     type="file"
-                    accept="image/*"
+                    accept=".jpg,.jpeg,.png,.gif,.webp,.bmp"
                     className="hidden"
                     onChange={onCategoryImageUpload}
                   />
@@ -728,6 +728,13 @@ export default function Modals({
                   {STATUS_MAP[selectedOrder.status]?.label || selectedOrder.status}
                 </Badge>
               </div>
+              {selectedOrder.status === 'pending' && selectedOrder.stockReservedUntil && (
+                <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
+                  {new Date(selectedOrder.stockReservedUntil).getTime() > Date.now()
+                    ? `Stock reservado hasta ${new Date(selectedOrder.stockReservedUntil).toLocaleString('es-AR')}. Confirmar descuenta el stock disponible.`
+                    : 'La reserva venció. Confirmar el pedido requiere stock disponible en este momento.'}
+                </p>
+              )}
 
               {/* Items */}
               <div>

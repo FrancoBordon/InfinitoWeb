@@ -1,19 +1,15 @@
 import type { CartItem } from '@/lib/types'
+import { getEffectivePrice } from '@/lib/pricing'
+import { formatPrice } from './whatsapp-order'
+
+export { formatPrice, getWhatsAppOrderUrl } from './whatsapp-order'
+export type { WhatsAppOrderLine } from './whatsapp-order'
 
 const WHATSAPP_NUMBER = '5493804313064'
 
-export function formatPrice(price: number): string {
-  return new Intl.NumberFormat('es-AR', {
-    style: 'currency',
-    currency: 'ARS',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(price)
-}
-
 export function generateWhatsAppMessage(items: CartItem[], total: number): string {
   const lines = items.map((item) => {
-    const price = item.product.promoPrice || item.product.price
+    const price = getEffectivePrice(item.product.price, item.product.promoPrice)
     const unitPrice = formatPrice(price)
     const talle = item.product.talle ? ` (${item.product.talle})` : ''
 

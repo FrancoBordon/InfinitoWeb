@@ -1,120 +1,113 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { z } from 'zod'
 import { db } from '@/lib/db'
+import { databaseUnavailableResponse } from '@/lib/database-errors'
+import { adminMutationFailure, requireAdmin } from '@/lib/api-security'
+import { updateProductSchema } from '@/lib/product-validation'
+import { getActiveReservedQuantities, lockProductRows } from '@/lib/stock-reservations'
 
-// GET /api/products/[id] - Get a single product
-export async function GET(
-  _request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const { id } = await params
+class ProductStockReservationError extends Error {}
 
-    const product = await db.product.findUnique({
-      where: { id },
-    })
+function parseImages(images: string | null): string[] {
+  if (!images) return []
+  const parsed: unknown = JSON.parse(images)
+  return Array.isArray(parsed) && parsed.every((image) => typeof image === 'string') ? parsed : []
+}
 
-    if (!product) {
-      return NextResponse.json(
-        { error: 'Product not found' },
-        { status: 404 }
-      )
-    }
-
-    // Parse images JSON string to array
-    const parsedProduct = {
-      ...product,
-      images: product.images ? JSON.parse(product.images) : [],
-    }
-
-    return NextResponse.json(parsedProduct)
-  } catch (error) {
-    console.error('Error fetching product:', error)
-    return NextResponse.json(
-      { error: 'Failed to fetch product' },
-      { status: 500 }
-    )
+function productResponse(product: Awaited<ReturnType<typeof db.product.findUnique>>, isAdmin: boolean) {
+  if (!product) return null
+  const { costPrice, ...publicFields } = product
+  return {
+    ...(isAdmin ? product : publicFields),
+    images: parseImages(product.images),
   }
 }
 
-// PUT /api/products/[id] - Update a product
-export async function PUT(
+export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const { id } = await params
-    const body = await request.json()
-    const { name, description, category, price, costPrice, promoPrice, imageUrl, images, stock, talle, active } = body
+    const product = await db.product.findUnique({ where: { id } })
+    if (!product) return NextResponse.json({ error: 'Product not found' }, { status: 404 })
 
-    // Check if product exists
-    const existing = await db.product.findUnique({ where: { id } })
-    if (!existing) {
-      return NextResponse.json(
-        { error: 'Product not found' },
-        { status: 404 }
-      )
-    }
-
-    const product = await db.product.update({
-      where: { id },
-      data: {
-        ...(name !== undefined && { name }),
-        ...(description !== undefined && { description }),
-        ...(category !== undefined && { category }),
-        ...(price !== undefined && { price: Number(price) }),
-        ...(costPrice !== undefined && { costPrice: Number(costPrice) }),
-        ...(promoPrice !== undefined && { promoPrice: promoPrice ? Number(promoPrice) : null }),
-        ...(imageUrl !== undefined && { imageUrl }),
-        ...(images !== undefined && { images: JSON.stringify(images) }),
-        ...(stock !== undefined && { stock: Number(stock) }),
-        ...(talle !== undefined && { talle }),
-        ...(active !== undefined && { active }),
-      },
+    const auth = requireAdmin(request)
+    if (!product.active && !auth.ok) return auth.response
+    return NextResponse.json(productResponse(product, auth.ok), {
+      headers: { 'Cache-Control': 'no-store' },
     })
-
-    // Parse images for the response
-    const parsedProduct = {
-      ...product,
-      images: product.images ? JSON.parse(product.images) : [],
-    }
-
-    return NextResponse.json(parsedProduct)
   } catch (error) {
-    console.error('Error updating product:', error)
-    return NextResponse.json(
-      { error: 'Failed to update product' },
-      { status: 500 }
-    )
+    const databaseErrorResponse = databaseUnavailableResponse(error)
+    if (databaseErrorResponse) return databaseErrorResponse
+    console.error('Error fetching product:', error)
+    return NextResponse.json({ error: 'Failed to fetch product' }, { status: 500 })
   }
 }
 
-// DELETE /api/products/[id] - Hard delete a product
-export async function DELETE(
-  _request: NextRequest,
+export async function PUT(
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const authError = adminMutationFailure(request)
+  if (authError) return authError
   try {
     const { id } = await params
-
-    // Check if product exists
-    const existing = await db.product.findUnique({ where: { id } })
-    if (!existing) {
-      return NextResponse.json(
-        { error: 'Product not found' },
-        { status: 404 }
-      )
+    const input = updateProductSchema.parse(await request.json())
+    const { images, ...fields } = input
+    const requestedStock = fields.stock
+    const data = {
+      ...fields,
+      ...(images !== undefined ? { images: JSON.stringify(images) } : {}),
     }
+    const product = requestedStock === undefined
+      ? await db.product.update({ where: { id }, data })
+      : await db.$transaction(async (tx) => {
+        await lockProductRows(tx, [id])
+        const existing = await tx.product.findUnique({ where: { id }, select: { id: true } })
+        if (!existing) return tx.product.update({ where: { id }, data })
+        const now = new Date()
+        const reservations = await getActiveReservedQuantities(tx, [id], now)
+        if (requestedStock < (reservations.get(id) ?? 0)) {
+          throw new ProductStockReservationError('El stock no puede ser menor que las unidades reservadas')
+        }
+        return tx.product.update({ where: { id }, data })
+      })
+    return NextResponse.json(productResponse(product, true))
+  } catch (error) {
+    if (error instanceof z.ZodError || error instanceof SyntaxError) {
+      return NextResponse.json({ error: 'Invalid product data' }, { status: 400 })
+    }
+    const databaseErrorResponse = databaseUnavailableResponse(error)
+    if (databaseErrorResponse) return databaseErrorResponse
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'P2025') {
+      return NextResponse.json({ error: 'Product not found' }, { status: 404 })
+    }
+    if (error instanceof ProductStockReservationError) {
+      return NextResponse.json({ error: error.message }, { status: 409 })
+    }
+    console.error('Error updating product:', error)
+    return NextResponse.json({ error: 'Failed to update product' }, { status: 500 })
+  }
+}
 
-    // Hard delete - remove product and its order items
-    await db.orderItem.deleteMany({ where: { productId: id } })
-    await db.product.delete({ where: { id } })
-
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const authError = adminMutationFailure(request)
+  if (authError) return authError
+  try {
+    const { id } = await params
+    await db.product.update({ where: { id }, data: { active: false } })
     return NextResponse.json({ success: true, id })
   } catch (error) {
+    const databaseErrorResponse = databaseUnavailableResponse(error)
+    if (databaseErrorResponse) return databaseErrorResponse
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'P2025') {
+      return NextResponse.json({ error: 'Product not found' }, { status: 404 })
+    }
     console.error('Error deleting product:', error)
-    return NextResponse.json(
-      { error: 'Failed to delete product' },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: 'Failed to delete product' }, { status: 500 })
   }
 }

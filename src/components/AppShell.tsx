@@ -1,5 +1,4 @@
 'use client'
-import { uploadProductImage } from '@/lib/supabase'
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useCartStore } from '@/lib/cart-store'
 import type { Product, Customer, Order, Category } from '@/lib/types'
@@ -10,6 +9,7 @@ import {
   emptyCustomerForm,
   emptyCategoryForm,
   uploadImage,
+  uploadImages,
   type ProductFormData,
   type CustomerFormData,
   type CategoryFormData,
@@ -157,7 +157,7 @@ export default function AppShell() {
   // ─── Fetch All Products (for admin) ──────────────────────────────
   const fetchAllProducts = useCallback(async () => {
     try {
-      const res = await fetchWithRetry('/api/products')
+      const res = await fetchWithRetry('/api/products?includeInactive=true')
       const data = await res.json()
       setProducts(Array.isArray(data) ? data : [])
     } catch {
@@ -203,7 +203,9 @@ export default function AppShell() {
   const fetchCategories = useCallback(async () => {
     setCategoriesLoading(true)
     try {
-      const res = await fetchWithRetry('/api/categories')
+      const res = await fetchWithRetry(
+        isAdminLoggedIn ? '/api/categories?includeInactive=true' : '/api/categories'
+      )
       const data = await res.json()
       setCategories(Array.isArray(data) ? data : [])
     } catch {
@@ -211,25 +213,44 @@ export default function AppShell() {
     } finally {
       setCategoriesLoading(false)
     }
-  }, [])
+  }, [isAdminLoggedIn])
 
   // ─── Effects ─────────────────────────────────────────────────────
   useEffect(() => {
-    fetchCategories()
+    let mounted = true
+    fetch('/api/auth', { cache: 'no-store' })
+      .then(async (response) => {
+        if (!response.ok) return
+        const data = await response.json()
+        if (mounted && data.ok) {
+          setIsAdminLoggedIn(true)
+          setAdminName(data.user?.name || data.user?.email || 'Admin')
+        }
+      })
+      .catch((error) => {
+        console.error('Unable to restore admin session:', error)
+      })
+    return () => { mounted = false }
+  }, [])
+
+  useEffect(() => {
+    void Promise.resolve().then(fetchCategories)
   }, [fetchCategories])
 
   useEffect(() => {
     if (activeTab === 'catalogo') {
-      fetchProducts()
+      void Promise.resolve().then(fetchProducts)
     }
   }, [activeTab, fetchProducts])
 
   useEffect(() => {
     if (isAdminLoggedIn && activeTab === 'admin') {
-      fetchAllProducts()
-      fetchCustomers()
-      fetchOrders()
-      fetchCategories()
+      void Promise.resolve().then(() => {
+        fetchAllProducts()
+        fetchCustomers()
+        fetchOrders()
+        fetchCategories()
+      })
     }
   }, [isAdminLoggedIn, activeTab, fetchAllProducts, fetchCustomers, fetchOrders, fetchCategories])
 
@@ -253,6 +274,7 @@ export default function AppShell() {
       }
       setIsAdminLoggedIn(true)
       setAdminName(data.user?.name || loginEmail)
+      setActiveTab('admin')
       setShowLoginModal(false)
       setLoginEmail('')
       setLoginPassword('')
@@ -273,29 +295,39 @@ export default function AppShell() {
     }
   }
 
+  const handleAdminLogout = async () => {
+    try {
+      const response = await fetch('/api/auth', { method: 'DELETE' })
+      if (!response.ok) throw new Error('No se pudo cerrar la sesión')
+      setIsAdminLoggedIn(false)
+      setAdminName('')
+      setActiveTab('catalogo')
+      toast.success('Sesión cerrada')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Error al cerrar sesión')
+    }
+  }
+
   // ─── Product Image Upload ────────────────────────────────────────
   const handleProductImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files
     if (!files || files.length === 0) return
     setUploadingImage(true)
     try {
-      for (const file of Array.from(files)) {
-  const imageUrl = await uploadProductImage(file)
-
-  if (imageUrl) {
-    setProductForm((prev) => {
-      const newImages = [...prev.images, imageUrl]
-      return {
-        ...prev,
-        images: newImages,
-        imageUrl: prev.imageUrl || imageUrl,
+      const imageUrls = await uploadImages(Array.from(files), 'product')
+      for (const imageUrl of imageUrls) {
+        setProductForm((prev) => {
+          const newImages = [...prev.images, imageUrl]
+          return {
+            ...prev,
+            images: newImages,
+            imageUrl: prev.imageUrl || imageUrl,
+          }
+        })
       }
-    })
-  }
-}
       toast.success('Imagen(es) subida(s) correctamente')
-    } catch {
-      toast.error('Error al subir imagen')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Error al subir imagen')
     } finally {
       setUploadingImage(false)
       e.target.value = ''
@@ -416,7 +448,7 @@ export default function AppShell() {
       description: product.description || '',
       category: product.category,
       price: product.price.toString(),
-      costPrice: product.costPrice.toString(),
+      costPrice: (product.costPrice ?? 0).toString(),
       promoPrice: product.promoPrice?.toString() || '',
       stock: product.stock.toString(),
       talle: product.talle || '',
@@ -662,11 +694,12 @@ export default function AppShell() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: newStatus }),
       })
-      if (!res.ok) throw new Error()
+      const data = await res.json().catch(() => ({})) as { error?: string }
+      if (!res.ok) throw new Error(data.error || 'No se pudo actualizar el estado')
       toast.success('Estado actualizado')
       await fetchOrders()
-    } catch {
-      toast.error('Error al actualizar estado')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Error al actualizar estado')
     }
   }
 
@@ -712,12 +745,22 @@ export default function AppShell() {
             {isAdminLoggedIn && activeTab === 'admin' && (
               <div className="flex items-center gap-2 ml-2">
                 <span className="text-xs text-cream/50 hidden lg:inline">{adminName}</span>
-                <button onClick={() => { setIsAdminLoggedIn(false); setAdminName(''); setActiveTab('catalogo') }} className="rounded-md px-3 py-1.5 text-sm font-medium text-cream/50 hover:bg-white/10 hover:text-cream" title="Cerrar sesión"><LogOut className="size-4" /></button>
+                <button onClick={handleAdminLogout} className="rounded-md px-3 py-1.5 text-sm font-medium text-cream/50 hover:bg-white/10 hover:text-cream" title="Cerrar sesión"><LogOut className="size-4" /></button>
               </div>
             )}
           </nav>
 
           <div className="flex items-center gap-2 sm:hidden">
+            {isAdminLoggedIn && activeTab === 'admin' && (
+              <button
+                onClick={handleAdminLogout}
+                className="p-2 text-cream/70 hover:text-cream"
+                title="Cerrar sesión"
+                aria-label="Cerrar sesión"
+              >
+                <LogOut className="size-5" />
+              </button>
+            )}
             <button onClick={() => setActiveTab('carrito')} className="relative p-2 text-cream/80 hover:text-cream">
               <ShoppingBag className="size-5" />
               {cartCount > 0 && <Badge className="absolute -right-1 -top-1 flex size-5 items-center justify-center rounded-full bg-gold p-0 text-[10px] font-bold text-ink">{cartCount}</Badge>}

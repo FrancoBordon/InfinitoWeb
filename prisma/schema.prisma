@@ -59,10 +59,12 @@ model Order {
   items       OrderItem[]
   total       Float
   status      String      @default("pending") // pending, confirmed, shipped, delivered, cancelled
+  stockReservedUntil DateTime?
   notes       String?
   source      String      @default("whatsapp") // whatsapp, manual
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
+  @@index([status, stockReservedUntil])
 }
 
 model OrderItem {

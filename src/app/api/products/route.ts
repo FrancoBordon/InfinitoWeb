@@ -1,103 +1,93 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { z } from 'zod'
 import { db } from '@/lib/db'
+import { databaseUnavailableResponse } from '@/lib/database-errors'
+import { adminMutationFailure, requireAdmin } from '@/lib/api-security'
+import { createProductSchema } from '@/lib/product-validation'
 
-// GET /api/products - List all products with optional filters
-// Supports: ?category=joyas&active=true&search=anillo
+function parseImages(images: string | null): string[] {
+  if (!images) return []
+  const parsed: unknown = JSON.parse(images)
+  return Array.isArray(parsed) && parsed.every((image) => typeof image === 'string') ? parsed : []
+}
+
+function publicProduct(product: Awaited<ReturnType<typeof db.product.findMany>>[number]) {
+  const { costPrice: _costPrice, ...publicFields } = product
+  return { ...publicFields, images: parseImages(product.images) }
+}
+
+function adminProduct(product: Awaited<ReturnType<typeof db.product.findMany>>[number]) {
+  return { ...product, images: parseImages(product.images) }
+}
+
 export async function GET(request: NextRequest) {
   try {
-    const { searchParams } = new URL(request.url)
-    const category = searchParams.get('category')
-    const active = searchParams.get('active')
-    const search = searchParams.get('search')
+    const { searchParams } = request.nextUrl
+    const includeInactive = searchParams.get('includeInactive') === 'true'
+    const requestedActive = searchParams.get('active')
+    const auth = requireAdmin(request)
+    const isAdmin = auth.ok
 
-    const where: Record<string, unknown> = {}
-
-    if (category) {
-      where.category = category
+    if ((includeInactive || requestedActive === 'false') && !isAdmin) {
+      return auth.ok ? NextResponse.json({ error: 'Forbidden' }, { status: 403 }) : auth.response
     }
 
-    if (active === 'true') {
-      where.active = true
-    } else if (active === 'false') {
-      where.active = false
-    }
-
-    if (search) {
-      where.OR = [
-        { name: { contains: search } },
-        { description: { contains: search } },
-      ]
-    }
-
+    const search = searchParams.get('search')?.trim().slice(0, 100)
     const products = await db.product.findMany({
-      where,
+      where: {
+        ...(!isAdmin ? { active: true } : {}),
+        ...(isAdmin && !includeInactive && requestedActive === 'true' ? { active: true } : {}),
+        ...(isAdmin && !includeInactive && requestedActive === 'false' ? { active: false } : {}),
+        ...(search ? {
+          OR: [
+            { name: { contains: search, mode: 'insensitive' as const } },
+            { description: { contains: search, mode: 'insensitive' as const } },
+          ],
+        } : {}),
+        ...(searchParams.get('category') ? { category: searchParams.get('category')! } : {}),
+      },
       orderBy: { createdAt: 'desc' },
     })
 
-    // Parse images JSON string to array for each product
-    const parsedProducts = products.map((p) => ({
-      ...p,
-      images: p.images ? JSON.parse(p.images) : [],
-    }))
-
-    return NextResponse.json(parsedProducts)
-  } catch (error) {
-    console.error('Error fetching products:', error)
     return NextResponse.json(
-      { error: 'Failed to fetch products' },
-      { status: 500 }
+      products.map(isAdmin ? adminProduct : publicProduct),
+      { headers: { 'Cache-Control': 'no-store' } }
     )
+  } catch (error) {
+    const databaseErrorResponse = databaseUnavailableResponse(error)
+    if (databaseErrorResponse) return databaseErrorResponse
+    console.error('Error fetching products:', error)
+    return NextResponse.json({ error: 'Failed to fetch products' }, { status: 500 })
   }
 }
 
-// POST /api/products - Create a new product
 export async function POST(request: NextRequest) {
+  const authError = adminMutationFailure(request)
+  if (authError) return authError
   try {
-    const body = await request.json()
-    const { name, description, category, price, costPrice, promoPrice, imageUrl, images, stock, talle } = body
-
-    if (!name) {
-      return NextResponse.json(
-        { error: 'Product name is required' },
-        { status: 400 }
-      )
-    }
-
-    if (price === undefined || price === null) {
-      return NextResponse.json(
-        { error: 'Product price is required' },
-        { status: 400 }
-      )
-    }
-
+    const input = createProductSchema.parse(await request.json())
     const product = await db.product.create({
       data: {
-        name,
-        description: description || null,
-        category: category || 'General',
-        price: Number(price),
-        costPrice: costPrice ? Number(costPrice) : 0,
-        promoPrice: promoPrice ? Number(promoPrice) : null,
-        imageUrl: imageUrl || null,
-        images: images ? JSON.stringify(images) : "[]",
-        stock: stock ? Number(stock) : 0,
-        talle: talle || null,
+        ...input,
+        description: input.description ?? null,
+        category: input.category,
+        costPrice: input.costPrice ?? 0,
+        promoPrice: input.promoPrice ?? null,
+        imageUrl: input.imageUrl ?? null,
+        images: JSON.stringify(input.images ?? []),
+        stock: input.stock ?? 0,
+        talle: input.talle ?? null,
         active: true,
       },
     })
-
-    // Parse images for the response
-    const parsedProduct = {
-      ...product,
-      images: product.images ? JSON.parse(product.images) : [],
-    }
-
-    return NextResponse.json(parsedProduct, { status: 201 })
+    return NextResponse.json(adminProduct(product), { status: 201 })
   } catch (error) {
+    if (error instanceof z.ZodError || error instanceof SyntaxError) {
+      return NextResponse.json({ error: 'Invalid product data' }, { status: 400 })
+    }
+    const databaseErrorResponse = databaseUnavailableResponse(error)
+    if (databaseErrorResponse) return databaseErrorResponse
     console.error('Error creating product:', error)
-    return NextResponse.json(
-      { error: 'Failed to create product' },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: 'Failed to create product' }, { status: 500 })
   }
 }
