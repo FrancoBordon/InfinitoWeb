@@ -161,6 +161,8 @@ test('upload API protects product and category image uploads end to end', { time
       NEXT_PUBLIC_SUPABASE_ANON_KEY: 'test-anon-key',
       SUPABASE_SERVICE_ROLE_KEY: 'test-server-service-key',
       VERCEL_URL: '',
+      ['DATABASE_URL']: undefined,
+      ['DIRECT_URL']: undefined,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   })

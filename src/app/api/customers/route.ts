@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { db } from '@/lib/db'
+import { databaseUnavailableResponse } from '@/lib/database-errors'
 import { adminMutationFailure, requireAdmin } from '@/lib/api-security'
 
 const customerFields = {
@@ -42,6 +43,8 @@ export async function GET(request: NextRequest) {
       updatedAt: customer.updatedAt,
     })), { headers: { 'Cache-Control': 'no-store' } })
   } catch (error) {
+    const databaseErrorResponse = databaseUnavailableResponse(error)
+    if (databaseErrorResponse) return databaseErrorResponse
     console.error('Error fetching customers:', error)
     return NextResponse.json({ error: 'Failed to fetch customers' }, { status: 500 })
   }
@@ -66,6 +69,8 @@ export async function POST(request: NextRequest) {
     if (error instanceof z.ZodError || error instanceof SyntaxError) {
       return NextResponse.json({ error: 'Invalid customer data' }, { status: 400 })
     }
+    const databaseErrorResponse = databaseUnavailableResponse(error)
+    if (databaseErrorResponse) return databaseErrorResponse
     console.error('Error creating customer:', error)
     return NextResponse.json({ error: 'Failed to create customer' }, { status: 500 })
   }

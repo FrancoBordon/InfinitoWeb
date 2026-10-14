@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { db } from '@/lib/db'
+import { databaseUnavailableResponse } from '@/lib/database-errors'
 import { adminMutationFailure, requireAdmin } from '@/lib/api-security'
 import {
   aggregateOrderQuantities,
@@ -38,6 +39,8 @@ export async function GET(
     if (!order) return NextResponse.json({ error: 'Order not found' }, { status: 404 })
     return NextResponse.json(order, { headers: { 'Cache-Control': 'no-store' } })
   } catch (error) {
+    const databaseErrorResponse = databaseUnavailableResponse(error)
+    if (databaseErrorResponse) return databaseErrorResponse
     console.error('Error fetching order:', error)
     return NextResponse.json({ error: 'Failed to fetch order' }, { status: 500 })
   }
@@ -115,6 +118,8 @@ export async function PUT(
     if (error instanceof z.ZodError || error instanceof SyntaxError) {
       return NextResponse.json({ error: 'Invalid order data' }, { status: 400 })
     }
+    const databaseErrorResponse = databaseUnavailableResponse(error)
+    if (databaseErrorResponse) return databaseErrorResponse
     if (error instanceof OrderStatusTransitionError || error instanceof StockReservationError) {
       return NextResponse.json({ error: error.message }, { status: 409 })
     }

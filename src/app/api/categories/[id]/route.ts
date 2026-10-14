@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { databaseUnavailableResponse } from '@/lib/database-errors'
 import { adminMutationFailure, requireAdmin } from '@/lib/api-security'
 
 export async function GET(
@@ -16,6 +17,8 @@ export async function GET(
     }
     return NextResponse.json(category, { headers: { 'Cache-Control': 'no-store' } })
   } catch (error) {
+    const databaseErrorResponse = databaseUnavailableResponse(error)
+    if (databaseErrorResponse) return databaseErrorResponse
     console.error('Error fetching category:', error)
     return NextResponse.json({ error: 'Failed to fetch category' }, { status: 500 })
   }
@@ -32,6 +35,8 @@ export async function DELETE(
     await db.category.update({ where: { id }, data: { active: false } })
     return NextResponse.json({ success: true, id })
   } catch (error) {
+    const databaseErrorResponse = databaseUnavailableResponse(error)
+    if (databaseErrorResponse) return databaseErrorResponse
     if (error && typeof error === 'object' && 'code' in error && error.code === 'P2025') {
       return NextResponse.json({ error: 'Category not found' }, { status: 404 })
     }

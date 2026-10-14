@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { db } from '@/lib/db'
+import { databaseUnavailableResponse } from '@/lib/database-errors'
 import { adminMutationFailure, requireAdmin } from '@/lib/api-security'
 
 const updateSchema = z.object({
@@ -27,6 +28,8 @@ export async function GET(
     if (!customer) return NextResponse.json({ error: 'Customer not found' }, { status: 404 })
     return NextResponse.json(customer, { headers: { 'Cache-Control': 'no-store' } })
   } catch (error) {
+    const databaseErrorResponse = databaseUnavailableResponse(error)
+    if (databaseErrorResponse) return databaseErrorResponse
     console.error('Error fetching customer:', error)
     return NextResponse.json({ error: 'Failed to fetch customer' }, { status: 500 })
   }
@@ -47,6 +50,8 @@ export async function PUT(
     if (error instanceof z.ZodError || error instanceof SyntaxError) {
       return NextResponse.json({ error: 'Invalid customer data' }, { status: 400 })
     }
+    const databaseErrorResponse = databaseUnavailableResponse(error)
+    if (databaseErrorResponse) return databaseErrorResponse
     if (error && typeof error === 'object' && 'code' in error && error.code === 'P2025') {
       return NextResponse.json({ error: 'Customer not found' }, { status: 404 })
     }
@@ -66,6 +71,8 @@ export async function DELETE(
     await db.customer.delete({ where: { id } })
     return NextResponse.json({ success: true, id })
   } catch (error) {
+    const databaseErrorResponse = databaseUnavailableResponse(error)
+    if (databaseErrorResponse) return databaseErrorResponse
     if (error && typeof error === 'object' && 'code' in error && error.code === 'P2025') {
       return NextResponse.json({ error: 'Customer not found' }, { status: 404 })
     }

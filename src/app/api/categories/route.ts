@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { db } from '@/lib/db'
+import { databaseUnavailableResponse } from '@/lib/database-errors'
 import { adminMutationFailure, requireAdmin } from '@/lib/api-security'
 
 const categoryFields = {
@@ -32,6 +33,8 @@ export async function GET(request: NextRequest) {
     })
     return NextResponse.json(categories, { headers: { 'Cache-Control': 'no-store' } })
   } catch (error) {
+    const databaseErrorResponse = databaseUnavailableResponse(error)
+    if (databaseErrorResponse) return databaseErrorResponse
     console.error('Error fetching categories:', error)
     return NextResponse.json({ error: 'Failed to fetch categories' }, { status: 500 })
   }
@@ -55,6 +58,8 @@ export async function POST(request: NextRequest) {
     if (error instanceof z.ZodError || error instanceof SyntaxError) {
       return NextResponse.json({ error: 'Invalid category data' }, { status: 400 })
     }
+    const databaseErrorResponse = databaseUnavailableResponse(error)
+    if (databaseErrorResponse) return databaseErrorResponse
     if (error && typeof error === 'object' && 'code' in error && error.code === 'P2002') {
       return NextResponse.json({ error: 'Ya existe una categoría con ese nombre' }, { status: 409 })
     }
@@ -75,6 +80,8 @@ export async function PUT(request: NextRequest) {
     if (error instanceof z.ZodError || error instanceof SyntaxError) {
       return NextResponse.json({ error: 'Invalid category data' }, { status: 400 })
     }
+    const databaseErrorResponse = databaseUnavailableResponse(error)
+    if (databaseErrorResponse) return databaseErrorResponse
     if (error && typeof error === 'object' && 'code' in error) {
       if (error.code === 'P2025') return NextResponse.json({ error: 'Category not found' }, { status: 404 })
       if (error.code === 'P2002') return NextResponse.json({ error: 'Ya existe una categoría con ese nombre' }, { status: 409 })

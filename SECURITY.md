@@ -7,6 +7,7 @@
 - `APP_ORIGIN`: recommended canonical storefront origin (for example, `https://infinito-web.vercel.app`) for checking browser request origins. The request's own origin is also accepted for local development and configured Vercel hostnames.
 - `SUPABASE_SERVICE_ROLE_KEY`: required only by the server-side image upload endpoint. Keep it server-only, set it in Vercel Production (and Preview only if needed), and never use a `NEXT_PUBLIC_` name.
 - `STOCK_RESERVATIONS_ENABLED`: optional server-only recovery switch. Unset or any value other than the exact lowercase string `false` keeps reservations enabled. Set to `false` to stop creating new timed reservations; existing records and schema are preserved.
+- `DATABASE_URL`: required at runtime for PostgreSQL-backed APIs. Prisma is initialized lazily, so Preview builds do not require a database connection; database-dependent API calls return `503` if this variable is absent. Configure Preview with an isolated database if database-backed preview behavior is required.
 
 Never expose these values with a `NEXT_PUBLIC_` prefix. Configure them in the hosting provider's environment settings, not in source control.
 
@@ -61,7 +62,7 @@ Admin stock edits are rejected if they would set physical stock below active res
 
 The Prisma schema is the application's intended model, not proof that every existing database has an identical physical schema. The production database has no `public._prisma_migrations` table, so Prisma Migrate has not been established as its migration-history system. `db:push` synchronizes a schema without recording migration history; `db:migrate` invokes `prisma migrate dev` and can create/apply migration history when someone explicitly runs it. Neither script is invoked by the build hooks.
 
-The Vercel build script is `prisma generate && next build`; the package `postinstall` script is also only `prisma generate`. There is no `prisma migrate deploy`, `db push`, or reset in those build hooks. Do not add database-changing commands to build or install hooks.
+The Vercel build script is `prisma generate && next build`; the package `postinstall` script is also only `prisma generate`. Prisma Client construction and database connection are deferred until a database-backed API request, so build-time route analysis does not require `DATABASE_URL` and does not connect to a database. A runtime request to a database-backed API without `DATABASE_URL` receives a controlled `503`. There is no `prisma migrate deploy`, `db push`, or reset in those build hooks. Do not add database-changing commands to build or install hooks.
 
 Before adopting Prisma Migrate for production:
 

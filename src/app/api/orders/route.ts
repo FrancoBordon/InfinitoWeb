@@ -2,6 +2,7 @@ import { createHash } from 'crypto'
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { db } from '@/lib/db'
+import { databaseUnavailableResponse } from '@/lib/database-errors'
 import { requireAdmin, verifyRequestOrigin } from '@/lib/api-security'
 import { isRateLimited } from '@/lib/login-rate-limit'
 import { calculateOrderSnapshot } from '@/lib/pricing'
@@ -52,6 +53,8 @@ export async function GET(request: NextRequest) {
       headers: { 'Cache-Control': 'no-store' },
     })
   } catch (error) {
+    const databaseErrorResponse = databaseUnavailableResponse(error)
+    if (databaseErrorResponse) return databaseErrorResponse
     console.error('Error fetching orders:', error)
     return NextResponse.json({ error: 'Failed to fetch orders' }, { status: 500 })
   }
@@ -134,6 +137,8 @@ export async function POST(request: NextRequest) {
     if (error instanceof z.ZodError || error instanceof SyntaxError) {
       return NextResponse.json({ error: 'Invalid order data' }, { status: 400 })
     }
+    const databaseErrorResponse = databaseUnavailableResponse(error)
+    if (databaseErrorResponse) return databaseErrorResponse
     if (error instanceof OrderInputError) {
       return NextResponse.json({ error: error.message }, { status: 409 })
     }

@@ -2,6 +2,7 @@ import { createHash } from 'crypto'
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { db } from '@/lib/db'
+import { databaseUnavailableResponse } from '@/lib/database-errors'
 import {
   clearAdminSessionCookie,
   createAdminSession,
@@ -82,6 +83,8 @@ export async function POST(request: NextRequest) {
     response.headers.set('Cache-Control', 'no-store')
     return response
   } catch (error) {
+    const databaseErrorResponse = databaseUnavailableResponse(error)
+    if (databaseErrorResponse) return databaseErrorResponse
     console.error('Admin login error:', error)
     return NextResponse.json({ ok: false, error: 'Error al iniciar sesión' }, { status: 500 })
   }
