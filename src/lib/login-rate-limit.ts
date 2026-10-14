@@ -25,17 +25,17 @@ async function upstashCommand(command: string, key: string, argument?: string): 
   return result.result
 }
 
-async function increment(key: string): Promise<number> {
+async function increment(key: string, windowSeconds: number): Promise<number> {
   if (process.env.NODE_ENV === 'production') {
     const count = await upstashCommand('incr', key)
-    await upstashCommand('expire', key, String(WINDOW_SECONDS))
+    await upstashCommand('expire', key, String(windowSeconds))
     return count
   }
 
   const now = Date.now()
   const current = localAttempts.get(key)
   if (!current || current.expiresAt <= now) {
-    localAttempts.set(key, { count: 1, expiresAt: now + WINDOW_SECONDS * 1000 })
+    localAttempts.set(key, { count: 1, expiresAt: now + windowSeconds * 1000 })
     return 1
   }
   current.count += 1
@@ -43,7 +43,19 @@ async function increment(key: string): Promise<number> {
 }
 
 export async function isLoginRateLimited(key: string): Promise<boolean> {
-  return (await increment(key)) > MAX_ATTEMPTS
+  return isRateLimited(key, MAX_ATTEMPTS, WINDOW_SECONDS)
+}
+
+export async function isRateLimited(
+  key: string,
+  maxAttempts: number,
+  windowSeconds: number
+): Promise<boolean> {
+  if (!Number.isInteger(maxAttempts) || maxAttempts < 1 ||
+    !Number.isInteger(windowSeconds) || windowSeconds < 1) {
+    throw new Error('Rate-limit thresholds must be positive integers')
+  }
+  return (await increment(key, windowSeconds)) > maxAttempts
 }
 
 export async function clearLoginAttempts(key: string): Promise<void> {

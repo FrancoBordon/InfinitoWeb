@@ -1,5 +1,4 @@
 'use client'
-import { uploadProductImage } from '@/lib/supabase'
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useCartStore } from '@/lib/cart-store'
 import type { Product, Customer, Order, Category } from '@/lib/types'
@@ -10,6 +9,7 @@ import {
   emptyCustomerForm,
   emptyCategoryForm,
   uploadImage,
+  uploadImages,
   type ProductFormData,
   type CustomerFormData,
   type CategoryFormData,
@@ -314,23 +314,20 @@ export default function AppShell() {
     if (!files || files.length === 0) return
     setUploadingImage(true)
     try {
-      for (const file of Array.from(files)) {
-  const imageUrl = await uploadProductImage(file)
-
-  if (imageUrl) {
-    setProductForm((prev) => {
-      const newImages = [...prev.images, imageUrl]
-      return {
-        ...prev,
-        images: newImages,
-        imageUrl: prev.imageUrl || imageUrl,
+      const imageUrls = await uploadImages(Array.from(files), 'product')
+      for (const imageUrl of imageUrls) {
+        setProductForm((prev) => {
+          const newImages = [...prev.images, imageUrl]
+          return {
+            ...prev,
+            images: newImages,
+            imageUrl: prev.imageUrl || imageUrl,
+          }
+        })
       }
-    })
-  }
-}
       toast.success('Imagen(es) subida(s) correctamente')
-    } catch {
-      toast.error('Error al subir imagen')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Error al subir imagen')
     } finally {
       setUploadingImage(false)
       e.target.value = ''
@@ -697,11 +694,12 @@ export default function AppShell() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: newStatus }),
       })
-      if (!res.ok) throw new Error()
+      const data = await res.json().catch(() => ({})) as { error?: string }
+      if (!res.ok) throw new Error(data.error || 'No se pudo actualizar el estado')
       toast.success('Estado actualizado')
       await fetchOrders()
-    } catch {
-      toast.error('Error al actualizar estado')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Error al actualizar estado')
     }
   }
 

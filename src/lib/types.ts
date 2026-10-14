@@ -46,6 +46,7 @@ export interface Order {
   customerPhone: string | null
   total: number
   status: string
+  stockReservedUntil: string | null
   notes: string | null
   source: string
   createdAt: string

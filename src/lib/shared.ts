@@ -87,33 +87,27 @@ export function getGradient(name: string) {
 }
 
 // ─── Image Upload Helper ─────────────────────────────────────────────
-export async function uploadImage(file: File): Promise<string | null> {
-  const MAX_SIZE = 10 * 1024 * 1024
-
-  // Client-side validation
-  if (file.size === 0) { toast.error('El archivo está vacío'); return null }
-  if (file.size > MAX_SIZE) { toast.error('Archivo demasiado grande. Máximo 10MB'); return null }
-
-  const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml', 'image/bmp']
-  if (!allowedTypes.includes(file.type)) {
-    toast.error('Formato no permitido. Usá JPG, PNG, GIF, WebP o SVG')
-    return null
-  }
-
+export async function uploadImages(files: File[], purpose: 'product' | 'category'): Promise<string[]> {
+  if (files.length < 1 || files.length > 5) throw new Error('Seleccioná entre 1 y 5 imágenes')
   const formData = new FormData()
-  formData.append('file', file)
+  formData.set('purpose', purpose)
+  for (const file of files) formData.append('files', file)
 
+  const res = await fetch('/api/upload', { method: 'POST', body: formData })
+  const data = await res.json().catch(() => ({})) as { error?: string; imageUrls?: unknown }
+  if (!res.ok) throw new Error(data.error || 'Error al subir imagen')
+  if (!Array.isArray(data.imageUrls) || data.imageUrls.length !== files.length ||
+    !data.imageUrls.every((url): url is string => typeof url === 'string')) {
+    throw new Error('Respuesta inválida al subir imágenes')
+  }
+  return data.imageUrls
+}
+
+export async function uploadImage(file: File, purpose: 'product' | 'category' = 'category'): Promise<string | null> {
   try {
-    const res = await fetch('/api/upload', { method: 'POST', body: formData })
-    if (!res.ok) {
-      const errData = await res.json().catch(() => ({}))
-      toast.error(errData.error || 'Error al subir imagen')
-      return null
-    }
-    const data = await res.json()
-    return data.imageUrl
-  } catch {
-    toast.error('Error al subir imagen. Verificá tu conexión.')
+    return (await uploadImages([file], purpose))[0]
+  } catch (error) {
+    toast.error(error instanceof Error ? error.message : 'Error al subir imagen')
     return null
   }
 }

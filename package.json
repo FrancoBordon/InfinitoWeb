@@ -7,6 +7,7 @@
     "build": "prisma generate && next build",
     "start": "next start -p 3000",
     "lint": "eslint .",
+    "test:security": "node --experimental-strip-types --test tests\\security\\image-validation.test.mjs tests\\security\\api-and-order.test.mjs tests\\security\\password-security.test.mjs tests\\security\\upload-route.test.mjs",
     "postinstall": "prisma generate",
     "db:push": "prisma db push",
     "db:generate": "prisma generate",

@@ -89,8 +89,10 @@ export function requireAdmin(request: NextRequest): AdminResult {
     if (
       session.role !== 'admin' ||
       typeof session.adminId !== 'string' ||
+      session.adminId.trim().length === 0 ||
       typeof session.email !== 'string' ||
-      typeof session.exp !== 'number' ||
+      session.email.trim().length === 0 ||
+      !Number.isSafeInteger(session.exp) ||
       session.exp <= Math.floor(Date.now() / 1000)
     ) {
       return { ok: false, response: NextResponse.json({ error: 'Authentication required' }, { status: 401 }) }

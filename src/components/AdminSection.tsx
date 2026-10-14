@@ -563,6 +563,15 @@ export default function AdminSection({
             <div className="space-y-3">
               {ordersData.orders.map((order) => {
                 const statusInfo = STATUS_MAP[order.status] || STATUS_MAP.pending
+                const statusOptions = order.status === 'pending'
+                  ? [['pending', 'Pendiente'], ['confirmed', 'Confirmado'], ['cancelled', 'Cancelado']]
+                  : order.status === 'confirmed'
+                    ? [['confirmed', 'Confirmado'], ['shipped', 'Enviado'], ['cancelled', 'Cancelado']]
+                    : order.status === 'shipped'
+                      ? [['shipped', 'Enviado'], ['delivered', 'Entregado']]
+                      : order.status === 'delivered'
+                        ? [['delivered', 'Entregado']]
+                        : [['cancelled', 'Cancelado']]
                 return (
                   <Card key={order.id} className="border-gold/15 transition-all hover:shadow-md">
                     <CardContent className="p-4">
@@ -618,11 +627,9 @@ export default function AdminSection({
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
-                                <SelectItem value="pending">Pendiente</SelectItem>
-                                <SelectItem value="confirmed">Confirmado</SelectItem>
-                                <SelectItem value="shipped">Enviado</SelectItem>
-                                <SelectItem value="delivered">Entregado</SelectItem>
-                                <SelectItem value="cancelled">Cancelado</SelectItem>
+                                {statusOptions.map(([value, label]) => (
+                                  <SelectItem key={value} value={value}>{label}</SelectItem>
+                                ))}
                               </SelectContent>
                             </Select>
                             <Button
