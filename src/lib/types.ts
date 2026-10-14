@@ -15,7 +15,7 @@ export interface Product {
   description: string | null
   category: string
   price: number
-  costPrice: number
+  costPrice?: number
   promoPrice: number | null
   imageUrl: string | null
   images: string[] // JSON array of image URLs parsed from the DB string

@@ -1,120 +1,85 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { z } from 'zod'
 import { db } from '@/lib/db'
+import { adminMutationFailure, requireAdmin } from '@/lib/api-security'
 
-// GET /api/categories - List categories
-// Supports: ?includeInactive=true (for admin panel)
+const categoryFields = {
+  name: z.string().trim().min(1).max(100),
+  description: z.string().max(2000).nullable().optional(),
+  imageUrl: z.string().max(2048).nullable().optional(),
+  sortOrder: z.number().int().min(0).max(100_000).optional(),
+}
+const createSchema = z.object(categoryFields).strict()
+const updateSchema = z.object({
+  id: z.string().min(1).max(100),
+  name: categoryFields.name.optional(),
+  description: categoryFields.description,
+  imageUrl: categoryFields.imageUrl,
+  sortOrder: categoryFields.sortOrder,
+  active: z.boolean().optional(),
+}).strict().refine(({ id, ...fields }) => Object.keys(fields).length > 0, 'At least one field is required')
+
 export async function GET(request: NextRequest) {
   try {
-    const { searchParams } = new URL(request.url)
-    const includeInactive = searchParams.get('includeInactive') === 'true'
-
-    const where = includeInactive ? {} : { active: true }
-
+    const includeInactive = request.nextUrl.searchParams.get('includeInactive') === 'true'
+    if (includeInactive) {
+      const auth = requireAdmin(request)
+      if (!auth.ok) return auth.response
+    }
     const categories = await db.category.findMany({
-      where,
+      where: includeInactive ? {} : { active: true },
       orderBy: { sortOrder: 'asc' },
     })
-    return NextResponse.json(categories)
+    return NextResponse.json(categories, { headers: { 'Cache-Control': 'no-store' } })
   } catch (error) {
     console.error('Error fetching categories:', error)
-    return NextResponse.json(
-      { error: 'Failed to fetch categories' },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: 'Failed to fetch categories' }, { status: 500 })
   }
 }
 
-// POST /api/categories - Create a new category
 export async function POST(request: NextRequest) {
+  const authError = adminMutationFailure(request)
+  if (authError) return authError
   try {
-    const body = await request.json()
-    const { name, description, imageUrl, sortOrder } = body
-
-    if (!name) {
-      return NextResponse.json(
-        { error: 'Category name is required' },
-        { status: 400 }
-      )
-    }
-
-    // Check if category with same name exists
-    const existing = await db.category.findUnique({ where: { name } })
-    if (existing) {
-      return NextResponse.json(
-        { error: 'Ya existe una categoría con ese nombre' },
-        { status: 409 }
-      )
-    }
-
+    const input = createSchema.parse(await request.json())
     const category = await db.category.create({
       data: {
-        name,
-        description: description || null,
-        imageUrl: imageUrl || null,
-        sortOrder: sortOrder ?? 0,
-        active: true,
+        ...input,
+        description: input.description ?? null,
+        imageUrl: input.imageUrl ?? null,
+        sortOrder: input.sortOrder ?? 0,
       },
     })
-
     return NextResponse.json(category, { status: 201 })
   } catch (error) {
+    if (error instanceof z.ZodError || error instanceof SyntaxError) {
+      return NextResponse.json({ error: 'Invalid category data' }, { status: 400 })
+    }
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'P2002') {
+      return NextResponse.json({ error: 'Ya existe una categoría con ese nombre' }, { status: 409 })
+    }
     console.error('Error creating category:', error)
-    return NextResponse.json(
-      { error: 'Failed to create category' },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: 'Failed to create category' }, { status: 500 })
   }
 }
 
-// PUT /api/categories - Update a category (expects id in body)
 export async function PUT(request: NextRequest) {
+  const authError = adminMutationFailure(request)
+  if (authError) return authError
   try {
-    const body = await request.json()
-    const { id, name, description, imageUrl, sortOrder, active } = body
-
-    if (!id) {
-      return NextResponse.json(
-        { error: 'Category ID is required' },
-        { status: 400 }
-      )
-    }
-
-    const existing = await db.category.findUnique({ where: { id } })
-    if (!existing) {
-      return NextResponse.json(
-        { error: 'Category not found' },
-        { status: 404 }
-      )
-    }
-
-    // Check name uniqueness if changing name
-    if (name && name !== existing.name) {
-      const nameConflict = await db.category.findUnique({ where: { name } })
-      if (nameConflict) {
-        return NextResponse.json(
-          { error: 'Ya existe una categoría con ese nombre' },
-          { status: 409 }
-        )
-      }
-    }
-
-    const category = await db.category.update({
-      where: { id },
-      data: {
-        ...(name !== undefined && { name }),
-        ...(description !== undefined && { description }),
-        ...(imageUrl !== undefined && { imageUrl }),
-        ...(sortOrder !== undefined && { sortOrder: Number(sortOrder) }),
-        ...(active !== undefined && { active }),
-      },
-    })
-
+    const input = updateSchema.parse(await request.json())
+    const { id, ...data } = input
+    const category = await db.category.update({ where: { id }, data })
     return NextResponse.json(category)
   } catch (error) {
+    if (error instanceof z.ZodError || error instanceof SyntaxError) {
+      return NextResponse.json({ error: 'Invalid category data' }, { status: 400 })
+    }
+    if (error && typeof error === 'object' && 'code' in error) {
+      if (error.code === 'P2025') return NextResponse.json({ error: 'Category not found' }, { status: 404 })
+      if (error.code === 'P2002') return NextResponse.json({ error: 'Ya existe una categoría con ese nombre' }, { status: 409 })
+    }
     console.error('Error updating category:', error)
-    return NextResponse.json(
-      { error: 'Failed to update category' },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: 'Failed to update category' }, { status: 500 })
   }
 }

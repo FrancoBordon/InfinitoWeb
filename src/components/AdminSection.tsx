@@ -256,7 +256,8 @@ export default function AdminSection({
               </TableHeader>
               <TableBody>
                 {adminFilteredProducts.map((product) => {
-                  const margin = product.price - product.costPrice
+                  const costPrice = product.costPrice ?? 0
+                  const margin = product.price - costPrice
                   const marginPct = product.price > 0 ? Math.round((margin / product.price) * 100) : 0
                   return (
                     <TableRow key={product.id} className="border-gold/10">
@@ -287,7 +288,7 @@ export default function AdminSection({
                         {formatPrice(product.price)}
                       </TableCell>
                       <TableCell className="text-right font-sans text-sm text-ink-muted">
-                        {formatPrice(product.costPrice)}
+                        {formatPrice(costPrice)}
                       </TableCell>
                       <TableCell className="text-right">
                         <span className={`text-sm font-medium ${marginPct >= 50 ? 'text-[#4A7C59]' : marginPct >= 30 ? 'text-ink' : 'text-[#8B3A3A]'}`}>
